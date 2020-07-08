@@ -8,12 +8,12 @@ from chinesecheckers.GameBoard import GameBoard
 from chinesecheckers.Player import Player
 from chinesecheckers.Point2D import Point2D
 
-ClientPayload = Union[int, bool, List[List[int]]]
+_ClientPayload = Union[int, bool, List[List[int]]]
 
 
 class GameHost(socketserver.ThreadingTCPServer):
     class GameTCPHandler(socketserver.StreamRequestHandler):
-        def receive(self) -> Tuple[str, ClientPayload]:
+        def receive(self) -> Tuple[str, _ClientPayload]:
             data = json.loads(self.rfile.readline().strip())
             return (
                 data.get("msg", "error"),
@@ -67,23 +67,38 @@ class GameHost(socketserver.ThreadingTCPServer):
         # returns a socketserver.BaseServer unless i add this...
         return self
 
-    def create_game(self) -> None:
-        self._accepting_players = False
-        self._num_players = len(self._players)
-        self._board = GameBoard(self._num_players, True)
-
-        self.broadcast(0, "board_init", str(self._board))
-
-        self._current_player = random.randint(0, self._num_players-1)
-        self.request_next_move()
-
     def create_player(self, rfile: BinaryIO, wfile: BinaryIO) -> Player:
         player = Player(rfile, wfile, len(self._players)+1)
         self._players.append(player)
         player.send("assign_id", str(player.PLAYER_ID))
         return player
 
-    def broadcast(
+    def create_game(self) -> None:
+        self._accepting_players = False
+        self._num_players = len(self._players)
+        self._board = GameBoard(self._num_players, True)
+
+        self._broadcast(0, "board_init", str(self._board))
+
+        self._current_player = random.randint(0, self._num_players-1)
+        self._request_next_move()
+
+    def maybe_do_move(self, hops: List[List[int]], player_id: int) -> None:
+        if player_id != self._current_player:
+            return
+
+        hop_points = [Point2D(p[0], p[1]) for p in hops]
+        if self._board.maybe_do_move(hop_points, player_id):
+            self._broadcast(0, "move", str(hops))
+            self._request_next_move()
+
+    def _request_next_move(self) -> None:
+        self._current_player = (self._current_player+1) % (self._num_players+1)
+        if self._current_player == 0:
+            self._current_player = 1
+        self._message_player(self._current_player, "request_move")
+
+    def _broadcast(
         self,
         exclude_id: int,
         msg: str,
@@ -93,7 +108,7 @@ class GameHost(socketserver.ThreadingTCPServer):
             if player.PLAYER_ID != exclude_id:
                 player.send(msg, payload)
 
-    def message_player(
+    def _message_player(
         self,
         player_id: int,
         msg: str,
@@ -102,24 +117,6 @@ class GameHost(socketserver.ThreadingTCPServer):
         for player in self._players:
             if player.PLAYER_ID == player_id:
                 player.send(msg, payload)
-
-    def request_next_move(self) -> None:
-        self._current_player = (self._current_player+1) % (self._num_players+1)
-        if self._current_player == 0:
-            self._current_player = 1
-        self.message_player(self._current_player, "request_move")
-
-    def maybe_do_move(self, hops: List[List[int]], player_id: int) -> None:
-        if player_id != self._current_player:
-            return
-
-        hop_points = [Point2D(p[0], p[1]) for p in hops]
-        if self._board.is_valid_move(hop_points, player_id):
-            p = hop_points[0]
-            q = hop_points[-1]
-            self._board.swap(p, q)
-            self.broadcast(0, "swap", f"[{p.x}, {p.y}, {q.x}, {q.y}]")
-            self.request_next_move()
 
     @property
     def running(self) -> bool:

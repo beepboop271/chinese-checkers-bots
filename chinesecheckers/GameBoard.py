@@ -111,18 +111,37 @@ class GameBoard(object):
         else:
             raise ValueError(f"Invalid number of players: {self._num_players}")
 
-    def is_valid_move(self, hops: List[Point2D], player_id: int) -> bool:
-        if self._board[hops[0].x][hops[0].y] != player_id:
+    def maybe_do_move(self, hops: List[Point2D], player_id: int) -> bool:
+        source_x = hops[0].x
+        source_y = hops[0].y
+        if (
+            source_x < 0
+            or source_x >= GameBoard.BOARD_SIZE
+            or source_y < 0
+            or source_y >= GameBoard.BOARD_SIZE
+        ):
+            return False
+        if self._board[source_x][source_y] != player_id:
             # Cannot move a piece that is not your own
             return False
 
-        for i in range(len(hops)-1):
-            if not self.is_valid_hop(hops[i], hops[i+1]):
+        original = self._board[source_x][source_y]
+        self._board[source_x][source_y] = 0
+        if len(hops) == 2:
+            # possible adjacent hop
+            if not self.is_valid_hop(hops[0], hops[1], True):
+                self._board[source_x][source_y] = original
                 return False
+        else:
+            for i in range(len(hops)-1):
+                if not self.is_valid_hop(hops[i], hops[i+1], False):
+                    self._board[source_x][source_y] = original
+                    return False
 
+        self._board[hops[-1].x][hops[-1].y] = original
         return True
 
-    def is_valid_hop(self, source: Point2D, dest: Point2D) -> bool:
+    def is_valid_hop(self, source: Point2D, dest: Point2D, allow_single: bool) -> bool:
         if (source.x < 0
             or source.y < 0
             or dest.x < 0
@@ -164,10 +183,7 @@ class GameBoard(object):
             cur_x += dx
             cur_y += dy
 
-        # TODO: make this single move verification less sketchy
-        return gaps[0] == 0 or gaps[0] == gaps[1]
-
-    def swap(self, p: Point2D, q: Point2D) -> None:
-        p_val = self._board[p.x][p.y]
-        self._board[p.x][p.y] = self._board[q.x][q.y]
-        self._board[q.x][q.y] = p_val
+        if len(gaps) == 1:
+            return gaps[0] == 0 and allow_single
+        else:
+            return gaps[0] == gaps[1]

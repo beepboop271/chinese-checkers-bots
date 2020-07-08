@@ -3,7 +3,7 @@ import json
 import socket
 import threading
 
-from typing import Deque, Dict, List, Optional, Tuple, Union, cast
+from typing import Deque, Dict, List, Optional, Sequence, Tuple, Union, cast
 
 import pygame  # type: ignore
 
@@ -27,12 +27,21 @@ COLOURS = [
 ]
 NAMES = ["", "red", "green", "blue", "yellow", "magenta", "cyan"]
 
+DELTAS = [
+    (1, 0),
+    (-1, 0),
+    (0, 1),
+    (0, -1),
+    (-1, 1),
+    (1, -1)
+]
+
 pygame.init()
 comicsans_28 = pygame.font.SysFont("Comic Sans MS", 28)
 
-ClientPayload = Optional[Union[int, str, List[List[int]]]]
-ServerMessage = Optional[Union[int, List[int], List[List[int]]]]
-PossibleMoveList = Dict[Tuple[int, int], List[List[int]]]
+ClientPayload = Optional[Union[str, List[Tuple[int, int]]]]
+ServerMessage = Optional[Union[int, List[List[int]]]]
+PossibleMoveList = Dict[Tuple[int, int], List[Tuple[int, int]]]
 
 
 def draw_board(
@@ -105,14 +114,71 @@ def board_coords_from_pixel(pos: Tuple[int, int]) -> Optional[Tuple[int, int]]:
     return (board_x, board_y)
 
 
-DELTAS = [
-    (1, 0),
-    (-1, 0),
-    (0, 1),
-    (0, -1),
-    (-1, 1),
-    (1, -1)
-]
+def pixel_coords_from_board(pos: Tuple[int, int]) -> Optional[Tuple[int, int]]:
+    if pos[0] < 0 or pos[0] >= BOARD_SIZE or pos[1] < 0 or pos[1] >= BOARD_SIZE:
+        return None
+
+    pixel_y = pos[1]*cell_size + radius
+    pixel_x = pos[0]*cell_size - radius*(11-pos[1])
+    return (pixel_x, pixel_y)
+
+
+def draw_hop_overlay(surf: pygame.Surface, hops: List[Tuple[int, int]]) -> None:
+    for i in range(len(hops)-1):
+        pygame.draw.circle(
+            surf,
+            (128, 128, 128),
+            pixel_coords_from_board(hops[i+1]),
+            int(radius*0.2)
+        )
+        pygame.draw.line(
+            surf,
+            (128, 128, 128),
+            pixel_coords_from_board(hops[i]),
+            pixel_coords_from_board(hops[i+1]),
+            int(radius*0.1)
+        )
+
+
+def in_board(x: int, y: int) -> bool:
+    return x >= 0 and x < BOARD_SIZE and y >= 0 and y < BOARD_SIZE
+
+
+def scan(
+    board: List[List[int]],
+    source_x: int, source_y: int,
+    dx: int, dy: int
+) -> Optional[Tuple[int, int]]:
+    cur_x = source_x+dx
+    cur_y = source_y+dy
+    if not in_board(cur_x, cur_y):
+        return None
+
+    dist = 1
+    while board[cur_x][cur_y] == 0:
+        cur_x += dx
+        cur_y += dy
+        dist += 1
+        if not in_board(cur_x, cur_y):
+            return None
+
+    if board[cur_x][cur_y] == -1:
+        return None
+
+    cur_x += dx
+    cur_y += dy
+    if not in_board(cur_x, cur_y) or board[cur_x][cur_y] != 0:
+        return None
+
+    dist -= 1
+    while dist > 0:
+        cur_x += dx
+        cur_y += dy
+        dist -= 1
+        if not in_board(cur_x, cur_y) or board[cur_x][cur_y] != 0:
+            return None
+
+    return (cur_x, cur_y)
 
 
 def get_possible(board: List[List[int]], source: Tuple[int, int]) -> PossibleMoveList:
@@ -120,81 +186,34 @@ def get_possible(board: List[List[int]], source: Tuple[int, int]) -> PossibleMov
     visited = [[False]*BOARD_SIZE for _ in range(BOARD_SIZE)]
     q: Deque[Tuple[int, int]] = collections.deque()
     q.append(source)
+    visited[source[0]][source[1]] = True
+
+    original = board[source[0]][source[1]]
+    board[source[0]][source[1]] = 0
 
     for direction in DELTAS:
         x = source[0]+direction[0]
         y = source[1]+direction[1]
-        if (
-            x >= 0
-            and x < BOARD_SIZE
-            and y >= 0
-            and y < BOARD_SIZE
-            and board[x][y] == 0
-        ):
-            possible[(x, y)] = [[source[0], source[1]], [x, y]]
+        if in_board(x, y) and board[x][y] == 0:
+            possible[(x, y)] = [source, (x, y)]
 
     while len(q) > 0:
         p = q.popleft()
         print(p)
 
         for direction in DELTAS:
-            dx = direction[0]
-            dy = direction[1]
-            cur_x = p[0]+dx
-            cur_y = p[1]+dy
-            dist = 1
-            while (
-                cur_x >= 0
-                and cur_x < BOARD_SIZE
-                and cur_y >= 0
-                and cur_y < BOARD_SIZE
-                and board[cur_x][cur_y] == 0
-            ):
-                cur_x += dx
-                cur_y += dy
-                dist += 1
-            if (
-                cur_x >= 0
-                and cur_x < BOARD_SIZE
-                and cur_y >= 0
-                and cur_y < BOARD_SIZE
-                and board[cur_x][cur_y] > 0
-            ):
-                print("1", cur_x, cur_y, dist)
-                cur_x += dx
-                cur_y += dy
-                dist -= 1
-                while (
-                    cur_x >= 0
-                    and cur_x < BOARD_SIZE
-                    and cur_y >= 0
-                    and cur_y < BOARD_SIZE
-                    and board[cur_x][cur_y] == 0
-                    and dist > 0
-                ):
-                    cur_x += dx
-                    cur_y += dy
-                    dist -= 1
-                if (
-                    cur_x >= 0
-                    and cur_x < BOARD_SIZE
-                    and cur_y >= 0
-                    and cur_y < BOARD_SIZE
-                    and board[cur_x][cur_y] == 0
-                    and dist == 0
-                    and not visited[cur_x][cur_y]
-                ):
-                    print("2", cur_x, cur_y, dist)
-                    visited[cur_x][cur_y] = True
-                    q.append((cur_x, cur_y))
-                    if p == source:
-                        possible[(cur_x, cur_y)] = [[source[0], source[1]], [cur_x, cur_y]]
-                    else:
-                        prev = possible[p]
-                        new = list(prev)
-                        new.append([cur_x, cur_y])
-                        possible[(cur_x, cur_y)] = new
+            maybe_dest = scan(board, p[0], p[1], direction[0], direction[1])
+            if maybe_dest is not None and not visited[maybe_dest[0]][maybe_dest[1]]:
+                visited[maybe_dest[0]][maybe_dest[1]] = True
+                q.append(maybe_dest)
+                if p == source:
+                    possible[maybe_dest] = [source, maybe_dest]
+                else:
+                    new = list(possible[p])
+                    new.append(maybe_dest)
+                    possible[maybe_dest] = new
 
+    board[source[0]][source[1]] = original
     return possible
 
 
@@ -209,14 +228,17 @@ with socket.socket() as sock:
         ))
 
     def receive() -> Tuple[str, ServerMessage]:
-        data = json.loads(sock.recv(2048))  # type: ignore
+        msg: List[bytes] = []
+        while len(msg) == 0 or msg[-1][-1] != ord("}"):
+            msg.append(sock.recv(256))
+        data = json.loads(b"".join(msg))  # type: ignore
         print(data)
         return (
             data.get("msg", "error"),
             data.get("payload", None)
         )
 
-    send("hello", 12345)
+    send("hello", "12345")
     msg, payload = receive()
     if msg == "no":
         raise RuntimeError("server not accepting new players")
@@ -234,18 +256,21 @@ with socket.socket() as sock:
         raise RuntimeError("wtf 2")
     board = cast(List[List[int]], payload)
 
-    def swap(points: List[int]) -> None:
-        p = board[points[0]][points[1]]
-        board[points[0]][points[1]] = board[points[2]][points[3]]
-        board[points[2]][points[3]] = p
+    def swap(p: Sequence[int], q: Sequence[int]) -> None:
+        p_val = board[p[0]][p[1]]
+        board[p[0]][p[1]] = board[q[0]][q[1]]
+        board[q[0]][q[1]] = p_val
 
-    def handle_incoming(request_move_flag: threading.Event) -> None:
+    def handle_incoming(request_move_flag: threading.Event, hops: List[List[int]]) -> None:
         while True:
-            print("wow")
             msg, payload = receive()
             print(msg, payload)
-            if msg == "swap":
-                swap(cast(List[int], payload))
+            if msg == "move":
+                payload = cast(List[List[int]], payload)
+                swap(payload[0], payload[-1])
+                hops.clear()
+                for hop in payload:
+                    hops.append(hop)
                 request_move_flag.clear()
             elif msg == "request_move":
                 request_move_flag.set()
@@ -253,14 +278,16 @@ with socket.socket() as sock:
                 raise RuntimeError("wtf 3")
 
     request_move_flag = threading.Event()
+    last_move_hops: List[List[int]] = []
     sock_thread = threading.Thread(
         target=handle_incoming,
-        args=(request_move_flag,),
+        args=(request_move_flag, last_move_hops),
         daemon=True
     )
     sock_thread.start()
 
     display = pygame.display.set_mode((window_size, window_size), pygame.RESIZABLE)
+    pygame.display.set_caption(f"Player {player_id} ({NAMES[player_id]})")
     clock = pygame.time.Clock()
     running = True
     source: Optional[Tuple[int, int]] = None
@@ -275,6 +302,13 @@ with socket.socket() as sock:
 
         draw_board(display, board, request_move_flag.is_set(), possible_moves)
 
+        if len(last_move_hops) > 0:
+            draw_hop_overlay(display, last_move_hops)  # type: ignore
+        if len(possible_moves) > 0:
+            hovering_point = board_coords_from_pixel(pygame.mouse.get_pos())
+            if hovering_point is not None and hovering_point in possible_moves:
+                draw_hop_overlay(display, possible_moves[hovering_point])
+
         for event in pygame.event.get():
             if event.type == pygame.VIDEORESIZE:
                 window_size = min(event.w, event.h)
@@ -287,20 +321,21 @@ with socket.socket() as sock:
                 )
             elif event.type == pygame.QUIT:
                 running = False
-            elif (event.type == pygame.MOUSEBUTTONUP
-                  and request_move_flag.is_set()
-            ):
-                selected_point = board_coords_from_pixel(event.pos)
-                if selected_point is not None:
-                    if len(possible_moves) > 0:
-                        if selected_point in possible_moves:
-                            send("make_move", possible_moves[selected_point])
-                        else:
-                            source = None
-                            possible_moves = {}
-                    elif board[selected_point[0]][selected_point[1]] == player_id:
-                        source = selected_point
-                        possible_moves = get_possible(board, selected_point)
+            elif event.type == pygame.MOUSEBUTTONUP:
+                if len(last_move_hops) > 0:
+                    last_move_hops.clear()
+                if request_move_flag.is_set():
+                    selected_point = board_coords_from_pixel(event.pos)
+                    if selected_point is not None:
+                        if len(possible_moves) > 0:
+                            if selected_point in possible_moves:
+                                send("make_move", possible_moves[selected_point])
+                            else:
+                                source = None
+                                possible_moves = {}
+                        elif board[selected_point[0]][selected_point[1]] == player_id:
+                            source = selected_point
+                            possible_moves = get_possible(board, selected_point)
 
         clock.tick(60)
         pygame.display.flip()
