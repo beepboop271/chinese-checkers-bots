@@ -4,8 +4,8 @@ import socketserver
 
 from typing import Tuple, cast, BinaryIO, List, Optional, Union
 
-from chinesecheckers.GameBoard import GameBoard
-from chinesecheckers.Player import Player
+from chinesecheckers.server.GameBoard import GameBoard
+from chinesecheckers.server.Player import Player
 from chinesecheckers.Point2D import Point2D
 
 _ClientPayload = Union[int, bool, List[List[int]]]
@@ -90,12 +90,21 @@ class GameHost(socketserver.ThreadingTCPServer):
         hop_points = [Point2D(p[0], p[1]) for p in hops]
         if self._board.maybe_do_move(hop_points, player_id):
             self._broadcast(0, "move", str(hops))
-            self._request_next_move()
+            if self._board.remaining_players > 0:
+                self._request_next_move()
+            else:
+                self._broadcast(0, "game_over")
+                self._running = False
 
     def _request_next_move(self) -> None:
         self._current_player = (self._current_player+1) % (self._num_players+1)
         if self._current_player == 0:
             self._current_player = 1
+
+        while self._board.is_winner(self._current_player):
+            self._current_player = (self._current_player+1) % (self._num_players+1)
+            if self._current_player == 0:
+                self._current_player = 1
         self._message_player(self._current_player, "request_move")
 
     def _broadcast(
@@ -125,7 +134,3 @@ class GameHost(socketserver.ThreadingTCPServer):
     @property
     def accepting_players(self) -> bool:
         return self._accepting_players
-
-    @property
-    def current_player(self) -> int:
-        return self._current_player

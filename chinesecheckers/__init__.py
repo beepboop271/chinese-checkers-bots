@@ -1,1 +1,1 @@
-# nothing to see here
+BOARD_SIZE = 17

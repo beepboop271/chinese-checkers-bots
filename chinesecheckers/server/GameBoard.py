@@ -1,16 +1,18 @@
 from typing import List
 
+from chinesecheckers import BOARD_SIZE
 from chinesecheckers.Point2D import Point2D
 from chinesecheckers.Point3D import Point3D
 
 
 class GameBoard(object):
-    __slots__ = ("_num_players", "_board")
-    BOARD_SIZE = 17
+    __slots__ = ("_num_players", "_board", "_win_statuses", "_remaining_players")
 
     def __init__(self, num_players: int, initialize_board: bool = False):
         self._num_players: int = num_players
         self._board: List[List[int]] = []
+        self._win_statuses: List[bool] = [False] * (num_players+1)
+        self._remaining_players: int = num_players
         if initialize_board:
             self.reset()
 
@@ -111,46 +113,48 @@ class GameBoard(object):
         else:
             raise ValueError(f"Invalid number of players: {self._num_players}")
 
+    def in_board(self, point: Point2D) -> bool:
+        return (
+            point.x >= 0
+            and point.x < BOARD_SIZE
+            and point.y >= 0
+            and point.y < BOARD_SIZE
+        )
+
     def maybe_do_move(self, hops: List[Point2D], player_id: int) -> bool:
+        if not self.in_board(hops[0]):
+            return False
+
         source_x = hops[0].x
         source_y = hops[0].y
-        if (
-            source_x < 0
-            or source_x >= GameBoard.BOARD_SIZE
-            or source_y < 0
-            or source_y >= GameBoard.BOARD_SIZE
-        ):
-            return False
         if self._board[source_x][source_y] != player_id:
             # Cannot move a piece that is not your own
             return False
 
-        original = self._board[source_x][source_y]
+        piece = self._board[source_x][source_y]
         self._board[source_x][source_y] = 0
         if len(hops) == 2:
             # possible adjacent hop
             if not self.is_valid_hop(hops[0], hops[1], True):
-                self._board[source_x][source_y] = original
+                self._board[source_x][source_y] = piece
                 return False
         else:
             for i in range(len(hops)-1):
                 if not self.is_valid_hop(hops[i], hops[i+1], False):
-                    self._board[source_x][source_y] = original
+                    self._board[source_x][source_y] = piece
                     return False
 
-        self._board[hops[-1].x][hops[-1].y] = original
+        self._board[hops[-1].x][hops[-1].y] = piece
+        self._check_winners()
         return True
 
-    def is_valid_hop(self, source: Point2D, dest: Point2D, allow_single: bool) -> bool:
-        if (source.x < 0
-            or source.y < 0
-            or dest.x < 0
-            or dest.y < 0
-            or source.x >= GameBoard.BOARD_SIZE
-            or source.y >= GameBoard.BOARD_SIZE
-            or dest.x >= GameBoard.BOARD_SIZE
-            or dest.y >= GameBoard.BOARD_SIZE
-        ):
+    def is_valid_hop(
+        self,
+        source: Point2D,
+        dest: Point2D,
+        allow_single: bool,
+    ) -> bool:
+        if not (self.in_board(source) and self.in_board(dest)):
             # out of bounds
             return False
 
@@ -187,3 +191,70 @@ class GameBoard(object):
             return gaps[0] == 0 and allow_single
         else:
             return gaps[0] == gaps[1]
+
+    # slot: one of the triangles surrounding the board where
+    # pieces start and end in. slot 0 is the top most, then
+    # ascending clockwise
+    _SLOT_BOUNDS = (
+        (9, 12, 3, False),
+        (13, 16, 4, True),
+        (9, 12, 12, False),
+        (4, 7, 13, True),
+        (0, 3, 12, False),
+        (4, 7, 4, True),
+    )
+
+    def _check_slot(
+        self,
+        slot_number: int,
+        player_id: int,
+    ) -> bool:
+        start_x, end_x, y_edge, pointing_up = GameBoard._SLOT_BOUNDS[slot_number]
+        if pointing_up:
+            scan = 4
+            for x in range(start_x, end_x+1):
+                for y in range(y_edge, y_edge+scan):
+                    print("check", x, y, "for", player_id)
+                    if self._board[x][y] != player_id:
+                        return False
+                scan -= 1
+            return True
+        else:
+            scan = 0
+            for x in range(start_x, end_x+1):
+                for y in range(y_edge-scan, y_edge+1):
+                    if self._board[x][y] != player_id:
+                        return False
+                scan += 1
+            return True
+
+    # _WIN_SLOTS[i][j] is the slot that player j+1
+    # needs to fill to win, in a game of i players
+    _WIN_SLOTS = (
+        None,
+        None,
+        (3, 0),
+        (4, 0, 2),
+        (4, 5, 1, 2),
+        None,
+        (3, 4, 5, 0, 1, 2),
+    )
+
+    def _check_winners(self) -> None:
+        slots = GameBoard._WIN_SLOTS[self._num_players]
+        if slots is None:
+            raise ValueError("bad num players")
+
+        for i in range(len(slots)):
+            print("check slot", slots[i], "for player", i+1)
+            if not self._win_statuses[i+1] and self._check_slot(slots[i], i+1):
+                self._remaining_players -= 1
+                self._win_statuses[i+1] = True
+        print(self._win_statuses)
+
+    def is_winner(self, player_id: int) -> bool:
+        return self._win_statuses[player_id]
+
+    @property
+    def remaining_players(self) -> int:
+        return self._remaining_players

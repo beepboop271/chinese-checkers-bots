@@ -181,7 +181,10 @@ def scan(
     return (cur_x, cur_y)
 
 
-def get_possible(board: List[List[int]], source: Tuple[int, int]) -> PossibleMoveList:
+def get_possible(
+    board: List[List[int]],
+    source: Tuple[int, int]
+) -> PossibleMoveList:
     possible: PossibleMoveList = {}
     visited = [[False]*BOARD_SIZE for _ in range(BOARD_SIZE)]
     q: Deque[Tuple[int, int]] = collections.deque()
@@ -221,9 +224,15 @@ with socket.socket() as sock:
     sock.connect((HOST, PORT))
 
     def send(msg: str, payload: ClientPayload) -> None:
-        print(f'sending {{"msg": "{msg}", "payload": {payload}}}\n')
+        print(
+            f'sending {{"msg": "{msg}", "payload": {payload}}}\n'
+                .replace("(", "[")  # noqa - flake8 wants it one tab left, which is nonsense
+                .replace(")", "]")
+        )
         sock.send(bytes(
-            f'{{"msg": "{msg}", "payload": {payload}}}\n',
+            f'{{"msg": "{msg}", "payload": {payload}}}\n'
+                .replace("(", "[")  # noqa
+                .replace(")", "]"),
             "ascii"
         ))
 
@@ -256,32 +265,38 @@ with socket.socket() as sock:
         raise RuntimeError("wtf 2")
     board = cast(List[List[int]], payload)
 
-    def swap(p: Sequence[int], q: Sequence[int]) -> None:
-        p_val = board[p[0]][p[1]]
-        board[p[0]][p[1]] = board[q[0]][q[1]]
-        board[q[0]][q[1]] = p_val
+    def move(source: Sequence[int], dest: Sequence[int]) -> None:
+        board[dest[0]][dest[1]] = board[source[0]][source[1]]
+        board[source[0]][source[1]] = 0
 
-    def handle_incoming(request_move_flag: threading.Event, hops: List[List[int]]) -> None:
+    def handle_incoming(
+        request_move_flag: threading.Event,
+        game_over_flag: threading.Event,
+        hops: List[List[int]]
+    ) -> None:
         while True:
             msg, payload = receive()
             print(msg, payload)
             if msg == "move":
                 payload = cast(List[List[int]], payload)
-                swap(payload[0], payload[-1])
+                move(payload[0], payload[-1])
                 hops.clear()
                 for hop in payload:
                     hops.append(hop)
                 request_move_flag.clear()
             elif msg == "request_move":
                 request_move_flag.set()
+            elif msg == "game_over":
+                game_over_flag.set()
             else:
                 raise RuntimeError("wtf 3")
 
     request_move_flag = threading.Event()
+    game_over_flag = threading.Event()
     last_move_hops: List[List[int]] = []
     sock_thread = threading.Thread(
         target=handle_incoming,
-        args=(request_move_flag, last_move_hops),
+        args=(request_move_flag, game_over_flag, last_move_hops),
         daemon=True
     )
     sock_thread.start()
@@ -289,11 +304,10 @@ with socket.socket() as sock:
     display = pygame.display.set_mode((window_size, window_size), pygame.RESIZABLE)
     pygame.display.set_caption(f"Player {player_id} ({NAMES[player_id]})")
     clock = pygame.time.Clock()
-    running = True
     source: Optional[Tuple[int, int]] = None
     possible_moves: PossibleMoveList = {}
 
-    while running:
+    while not game_over_flag.is_set():
         if (not request_move_flag.is_set()
             and (source is not None or len(possible_moves) > 0)
         ):
@@ -320,7 +334,7 @@ with socket.socket() as sock:
                     pygame.RESIZABLE
                 )
             elif event.type == pygame.QUIT:
-                running = False
+                game_over_flag.set()
             elif event.type == pygame.MOUSEBUTTONUP:
                 if len(last_move_hops) > 0:
                     last_move_hops.clear()
