@@ -225,6 +225,8 @@ with socket.socket() as sock:
         raise RuntimeError("wtf 2")
     board = cast(List[List[int]], payload)
 
+    receive()  # we dont need the starting player message
+
     def move(source: Sequence[int], dest: Sequence[int]) -> None:
         board[dest[0]][dest[1]] = board[source[0]][source[1]]
         board[source[0]][source[1]] = 0

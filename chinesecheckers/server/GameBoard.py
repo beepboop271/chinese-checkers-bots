@@ -1,6 +1,6 @@
 from typing import List
 
-from chinesecheckers import BOARD_SIZE
+from chinesecheckers import point_in_board
 from chinesecheckers.Point2D import Point2D
 from chinesecheckers.Point3D import Point3D
 
@@ -113,16 +113,8 @@ class GameBoard(object):
         else:
             raise ValueError(f"Invalid number of players: {self._num_players}")
 
-    def in_board(self, point: Point2D) -> bool:
-        return (
-            point.x >= 0
-            and point.x < BOARD_SIZE
-            and point.y >= 0
-            and point.y < BOARD_SIZE
-        )
-
     def maybe_do_move(self, hops: List[Point2D], player_id: int) -> bool:
-        if not self.in_board(hops[0]):
+        if not point_in_board(hops[0]):
             return False
 
         source_x = hops[0].x
@@ -154,7 +146,7 @@ class GameBoard(object):
         dest: Point2D,
         allow_single: bool,
     ) -> bool:
-        if not (self.in_board(source) and self.in_board(dest)):
+        if not (point_in_board(source) and point_in_board(dest)):
             # out of bounds
             return False
 
@@ -214,7 +206,6 @@ class GameBoard(object):
             scan = 4
             for x in range(start_x, end_x+1):
                 for y in range(y_edge, y_edge+scan):
-                    print("check", x, y, "for", player_id)
                     if self._board[x][y] != player_id:
                         return False
                 scan -= 1
@@ -246,7 +237,6 @@ class GameBoard(object):
             raise ValueError("bad num players")
 
         for i in range(len(slots)):
-            print("check slot", slots[i], "for player", i+1)
             if not self._win_statuses[i+1] and self._check_slot(slots[i], i+1):
                 self._remaining_players -= 1
                 self._win_statuses[i+1] = True

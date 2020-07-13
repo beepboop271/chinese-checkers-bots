@@ -1,5 +1,6 @@
 import json
 import random
+import time
 import socketserver
 
 from typing import Tuple, cast, BinaryIO, List, Optional, Union
@@ -78,9 +79,12 @@ class GameHost(socketserver.ThreadingTCPServer):
         self._num_players = len(self._players)
         self._board = GameBoard(self._num_players, True)
 
-        self._broadcast(0, "board_init", str(self._board))
-
         self._current_player = random.randint(0, self._num_players-1)
+
+        self._broadcast(0, "board_init", str(self._board))
+        self._broadcast(0, "starting_player", str(self._current_player+1))
+        time.sleep(1)
+
         self._request_next_move()
 
     def maybe_do_move(self, hops: List[List[int]], player_id: int) -> None:
@@ -91,6 +95,7 @@ class GameHost(socketserver.ThreadingTCPServer):
         if self._board.maybe_do_move(hop_points, player_id):
             self._broadcast(0, "move", str(hops))
             if self._board.remaining_players > 0:
+                time.sleep(0.5)
                 self._request_next_move()
             else:
                 self._broadcast(0, "game_over")
